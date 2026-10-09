@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SIFRA – Facturation et relance automatique</title>
+<style>
+:root{--bg:#eef2f1;--panel:#fff;--ink:#17302b;--mut:#5d716d;--line:#d5dfdc;--acc:#0f6b5c;--acc2:#e8f3f0;--ok:#1d7a46;--warn:#b7791f;--bad:#b3261e;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#101a18;--panel:#17251f;--ink:#e3efec;--mut:#93aaa5;--line:#2a3d37;--acc:#4cc2ac;--acc2:#1d3430;--ok:#58c785;--warn:#e0a73f;--bad:#ff8a80}}
+:root[data-theme="dark"]{--bg:#101a18;--panel:#17251f;--ink:#e3efec;--mut:#93aaa5;--line:#2a3d37;--acc:#4cc2ac;--acc2:#1d3430;--ok:#58c785;--warn:#e0a73f;--bad:#ff8a80}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Segoe UI",system-ui,sans-serif}
+header{background:var(--acc);color:#fff;padding:14px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+header h1{margin:0;font:700 22px Georgia,serif;letter-spacing:.5px}header small{opacity:.85}
+nav{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+nav button{background:transparent;color:#fff;border:0;padding:8px 14px;border-radius:6px;cursor:pointer;font:inherit}
+nav button.on{background:rgba(255,255,255,.2);font-weight:600}
+main{max-width:1050px;margin:0 auto;padding:20px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:18px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px}
+.kpi b{display:block;font:700 22px Georgia,serif}.kpi span{color:var(--mut);font-size:13px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;margin-bottom:18px}
+h2{font:700 18px Georgia,serif;margin:0 0 12px}
+.scroll{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:560px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);font-size:14px}th{color:var(--mut);font-weight:600}
+input,select,textarea{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px;width:100%}
+label{font-size:13px;color:var(--mut);display:block;margin-bottom:3px}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:10px}
+button.b{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:8px 14px;cursor:pointer;font:inherit}
+button.b.s{background:var(--acc2);color:var(--acc)}button.b.d{background:transparent;color:var(--bad);border:1px solid var(--line)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.tag{padding:2px 9px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap}
+.Payée{background:#dff3e6;color:#1d7a46}.Attente{background:#fbefd5;color:#8a5a0c}.Retard{background:#f9dedc;color:#b3261e}
+.bars{display:flex;align-items:flex-end;gap:14px;height:140px;padding-top:8px}
+.bars div{flex:1;text-align:center;font-size:12px;color:var(--mut)}.bars i{display:block;background:var(--acc);border-radius:4px 4px 0 0;min-height:2px;margin-bottom:4px}
+.msg{white-space:pre-wrap;background:var(--bg);border:1px dashed var(--line);border-radius:6px;padding:10px;font-size:14px}
+.hide{display:none}.empty{color:var(--mut);padding:14px 0}.act{display:flex;gap:6px;flex-wrap:wrap}
+#toast{position:fixed;bottom:calc(16px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:6px;opacity:0;transition:opacity .2s;pointer-events:none}
+#toast.on{opacity:1}
+@media print{header,nav,main>*:not(#print){display:none!important}#print{display:block!important}body{background:#fff;color:#000}}
+#print{display:none}
+</style></head><body>
+<header><div><h1>SIFRA</h1><small>Système Intelligent de Facturation et de Relance Automatique</small></div>
+<nav id="nav"></nav></header>
+<main>
+<section id="v-dash"></section>
+<section id="v-cli" class="hide"></section>
+<section id="v-fac" class="hide"></section>
+<section id="v-rel" class="hide"></section>
+<section id="print"></section>
+</main>
+<div id="toast"></div>
+<script>
+const $=s=>document.querySelector(s);
+const fmt=n=>new Intl.NumberFormat('fr-FR').format(Math.round(n))+' FCFA';
+const today=()=>new Date().toISOString().slice(0,10);
+const addD=(d,n)=>{const x=new Date(d);x.setDate(x.getDate()+n);return x.toISOString().slice(0,10)};
+const diff=(a,b)=>Math.round((new Date(a)-new Date(b))/864e5);
+const fd=d=>d.split('-').reverse().join('/');
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const TVA=0.18;
+let db={clients:[],factures:[],relances:[],seq:1,lignes:[{d:'',q:1,p:0}]};
+try{const s=localStorage.getItem('sifra');if(s)db=JSON.parse(s)}catch(e){}
+function seed(){if(db.clients.length||db.factures.length)return;
+db.clients=[{id:1,nom:'Boutique Teranga',email:'contact@teranga.sn',tel:'77 000 00 01'},{id:2,nom:'Société Baobab SARL',email:'compta@baobab.sn',tel:'78 000 00 02'}];
+db.factures=[{n:'FAC-0001',c:1,date:addD(today(),-45),ech:addD(today(),-15),lignes:[{d:'Ordinateurs de bureau',q:2,p:250000}],paye:false},
+{n:'FAC-0002',c:2,date:addD(today(),-10),ech:addD(today(),20),lignes:[{d:'Maintenance mensuelle',q:1,p:120000}],paye:false},
+{n:'FAC-0003',c:1,date:addD(today(),-60),ech:addD(today(),-30),lignes:[{d:'Installation réseau',q:1,p:180000}],paye:true}];db.seq=4}
+function save(){try{localStorage.setItem('sifra',JSON.stringify(db))}catch(e){}}
+function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('on');setTimeout(()=>e.classList.remove('on'),2200)}
+const ht=f=>f.lignes.reduce((s,l)=>s+l.q*l.p,0),ttc=f=>ht(f)*(1+TVA);
+const statut=f=>f.paye?'Payée':(today()>f.ech?'En retard':'En attente');
+const cls=s=>s==='Payée'?'Payée':s==='En retard'?'Retard':'Attente';
+const cli=id=>db.clients.find(c=>c.id==id)||{nom:'?',email:''};
+// Règles de relance automatique selon le retard
+function niveau(f){const j=diff(today(),f.ech);if(f.paye||j<=0)return 0;return j>=30?3:j>=15?2:1}
+const NIV=['','Rappel amical','Relance ferme','Mise en demeure'];
+function texte(f,n){const c=cli(f.c),j=diff(today(),f.ech),m=fmt(ttc(f));
+const t=[,
+`Bonjour ${c.nom},\n\nSauf erreur de notre part, la facture ${f.n} d'un montant de ${m}, échue le ${fd(f.ech)}, reste impayée (${j} jour(s) de retard).\nMerci de procéder à son règlement.\n\nCordialement,\nService facturation`,
+`Bonjour ${c.nom},\n\nMalgré notre précédent rappel, la facture ${f.n} (${m}) demeure impayée depuis ${j} jours. Nous vous demandons de régulariser sous 7 jours.\n\nCordialement,\nService facturation`,
+`MISE EN DEMEURE\n\n${c.nom},\n\nLa facture ${f.n} (${m}) est impayée depuis ${j} jours. Sans règlement sous 8 jours, nous engagerons la procédure de recouvrement.\n\nLa Direction`];return t[n]}
+function nav(){const t=[['dash','Tableau de bord'],['cli','Clients'],['fac','Factures'],['rel','Relances']];
+$('#nav').innerHTML=t.map(([k,l])=>`<button data-k="${k}" class="${cur===k?'on':''}">${l}</button>`).join('');
+$('#nav').querySelectorAll('button').forEach(b=>b.onclick=()=>go(b.dataset.k))}
+let cur='dash';
+function go(k){cur=k;['dash','cli','fac','rel'].forEach(x=>$('#v-'+x).classList.toggle('hide',x!==k));nav();render()}
+function render(){({dash,cli:clients,fac:factures,rel:relances})[cur]()}
+function dash(){const fs=db.factures,tot=fs.reduce((s,f)=>s+ttc(f),0),enc=fs.filter(f=>f.paye).reduce((s,f)=>s+ttc(f),0);
+const imp=fs.filter(f=>!f.paye),ret=fs.filter(f=>statut(f)==='En retard'),mr=ret.reduce((s,f)=>s+ttc(f),0);
+const tx=tot?Math.round(enc/tot*100):0;
+const parC={};imp.forEach(f=>parC[cli(f.c).nom]=(parC[cli(f.c).nom]||0)+ttc(f));
+const e=Object.entries(parC),mx=Math.max(1,...e.map(x=>x[1]));
+$('#v-dash').innerHTML=`<div class="grid"><div class="kpi"><b>${fmt(tot)}</b><span>Total facturé (TTC)</span></div>
+<div class="kpi"><b>${fmt(enc)}</b><span>Encaissé (${tx} %)</span></div>
+<div class="kpi"><b>${fmt(tot-enc)}</b><span>Créances en cours</span></div>
+<div class="kpi"><b style="color:var(--bad)">${fmt(mr)}</b><span>${ret.length} facture(s) en retard</span></div></div>
+<div class="card"><h2>Créances impayées par client</h2>${e.length?`<div class="bars">${e.map(([n,v])=>`<div><i style="height:${v/mx*100}px"></i>${esc(n)}<br>${fmt(v)}</div>`).join('')}</div>`:'<div class="empty">Aucune créance impayée.</div>'}</div>
+<div class="card"><h2>Factures à relancer</h2>${ret.length?ret.map(f=>`<p>${f.n} – ${esc(cli(f.c).nom)} : ${fmt(ttc(f))}, ${diff(today(),f.ech)} j de retard <span class="tag Retard">${NIV[niveau(f)]}</span></p>`).join(''):'<div class="empty">Rien à relancer aujourd\'hui.</div>'}
+<button class="b" onclick="go('rel')">Ouvrir les relances</button></div>`}
+function clients(){$('#v-cli').innerHTML=`<div class="card"><h2>Nouveau client</h2><div class="row">
+<div><label>Nom</label><input id="cn"></div><div><label>Email</label><input id="ce" type="email"></div><div><label>Téléphone</label><input id="ct"></div></div>
+<button class="b" id="addc">Ajouter le client</button></div>
+<div class="card"><h2>Liste des clients</h2><div class="scroll"><table><tr><th>Nom</th><th>Email</th><th>Téléphone</th><th>Impayé</th><th></th></tr>
+${db.clients.map(c=>`<tr><td>${esc(c.nom)}</td><td>${esc(c.email)}</td><td>${esc(c.tel)}</td><td>${fmt(db.factures.filter(f=>f.c==c.id&&!f.paye).reduce((s,f)=>s+ttc(f),0))}</td><td><button class="b d" data-del="${c.id}">Supprimer</button></td></tr>`).join('')||'<tr><td colspan=5 class="empty">Aucun client. Ajoutez-en un ci-dessus.</td></tr>'}</table></div></div>`;
+$('#addc').onclick=()=>{const n=$('#cn').value.trim();if(!n)return toast('Saisissez le nom du client');
+db.clients.push({id:Date.now(),nom:n,email:$('#ce').value.trim(),tel:$('#ct').value.trim()});save();toast('Client ajouté');clients()};
+document.querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{const id=b.dataset.del;if(db.factures.some(f=>f.c==id))return toast('Ce client a des factures');
+db.clients=db.clients.filter(c=>c.id!=id);save();clients()})}
+function factures(){const L=db.lignes;
+$('#v-fac').innerHTML=`<div class="card"><h2>Nouvelle facture</h2><div class="row">
+<div><label>Client</label><select id="fc">${db.clients.map(c=>`<option value="${c.id}">${esc(c.nom)}</option>`).join('')}</select></div>
+<div><label>Date</label><input id="fd" type="date" value="${today()}"></div>
+<div><label>Délai de paiement (jours)</label><input id="fj" type="number" value="30" min="0"></div></div>
+${L.map((l,i)=>`<div class="row"><div style="grid-column:span 2"><label>Désignation</label><input data-i="${i}" data-k="d" value="${esc(l.d)}"></div>
+<div><label>Quantité</label><input data-i="${i}" data-k="q" type="number" min="1" value="${l.q}"></div>
+<div><label>Prix unitaire HT</label><input data-i="${i}" data-k="p" type="number" min="0" value="${l.p}"></div></div>`).join('')}
+<p><button class="b s" id="addl">+ Ajouter une ligne</button></p>
+<p id="tot"></p><button class="b" id="savef">Enregistrer la facture</button></div>
+<div class="card"><h2>Factures</h2><div class="scroll"><table><tr><th>N°</th><th>Client</th><th>Échéance</th><th>Montant TTC</th><th>Statut</th><th></th></tr>
+${db.factures.slice().reverse().map(f=>{const s=statut(f);return`<tr><td>${f.n}</td><td>${esc(cli(f.c).nom)}</td><td>${fd(f.ech)}</td><td>${fmt(ttc(f))}</td><td><span class="tag ${cls(s)}">${s}</span></td>
+<td><div class="act">${f.paye?'':`<button class="b" data-pay="${f.n}">Encaisser</button>`}<button class="b s" data-pr="${f.n}">Imprimer</button></div></td></tr>`}).join('')||'<tr><td colspan=6 class="empty">Aucune facture.</td></tr>'}</table></div></div>`;
+const upd=()=>{const h=L.reduce((s,l)=>s+l.q*l.p,0);$('#tot').innerHTML=`HT : <b>${fmt(h)}</b> · TVA 18 % : <b>${fmt(h*TVA)}</b> · TTC : <b>${fmt(h*(1+TVA))}</b>`};upd();
+document.querySelectorAll('[data-i]').forEach(i=>i.oninput=()=>{const l=L[i.dataset.i],k=i.dataset.k;l[k]=k==='d'?i.value:+i.value||0;upd()});
+$('#addl').onclick=()=>{L.push({d:'',q:1,p:0});factures()};
+$('#savef').onclick=()=>{if(!db.clients.length)return toast('Ajoutez d\'abord un client');
+const ok=L.filter(l=>l.d.trim()&&l.p>0);if(!ok.length)return toast('Complétez au moins une ligne');
+const d=$('#fd').value||today();db.factures.push({n:'FAC-'+String(db.seq++).padStart(4,'0'),c:+$('#fc').value,date:d,ech:addD(d,+$('#fj').value||0),lignes:ok.map(l=>({...l})),paye:false});
+db.lignes=[{d:'',q:1,p:0}];save();toast('Facture enregistrée');factures()};
+document.querySelectorAll('[data-pay]').forEach(b=>b.onclick=()=>{const f=db.factures.find(x=>x.n===b.dataset.pay);f.paye=true;f.datePaie=today();save();toast('Paiement enregistré');factures()});
+document.querySelectorAll('[data-pr]').forEach(b=>b.onclick=()=>imprimer(b.dataset.pr))}
+function imprimer(n){const f=db.factures.find(x=>x.n===n),c=cli(f.c);
+$('#print').innerHTML=`<h1>FACTURE ${f.n}</h1><p>Date : ${fd(f.date)} · Échéance : ${fd(f.ech)}</p><p><b>Client :</b> ${esc(c.nom)}<br>${esc(c.email)}</p>
+<table><tr><th>Désignation</th><th>Qté</th><th>PU HT</th><th>Total HT</th></tr>${f.lignes.map(l=>`<tr><td>${esc(l.d)}</td><td>${l.q}</td><td>${fmt(l.p)}</td><td>${fmt(l.q*l.p)}</td></tr>`).join('')}</table>
+<p>Total HT : ${fmt(ht(f))}<br>TVA 18 % : ${fmt(ht(f)*TVA)}<br><b>Net à payer : ${fmt(ttc(f))}</b></p>`;window.print()}
+function relances(){const due=db.factures.filter(f=>niveau(f)>0);
+$('#v-rel').innerHTML=`<div class="card"><h2>Règles de relance automatique</h2>
+<p>Le système calcule le niveau selon le retard : 1 à 14 jours = rappel amical · 15 à 29 jours = relance ferme · 30 jours et plus = mise en demeure.</p>
+<button class="b" id="auto">Lancer les relances du jour</button></div>
+<div class="card"><h2>Factures à relancer</h2>${due.map(f=>`<div style="margin-bottom:14px"><b>${f.n}</b> – ${esc(cli(f.c).nom)} – ${fmt(ttc(f))} <span class="tag Retard">${NIV[niveau(f)]}</span>
+<div class="msg">${esc(texte(f,niveau(f)))}</div></div>`).join('')||'<div class="empty">Aucune facture en retard.</div>'}</div>
+<div class="card"><h2>Journal des relances</h2><div class="scroll"><table><tr><th>Date</th><th>Facture</th><th>Client</th><th>Niveau</th></tr>
+${db.relances.slice().reverse().map(r=>`<tr><td>${fd(r.date)}</td><td>${r.n}</td><td>${esc(r.cl)}</td><td>${NIV[r.niv]}</td></tr>`).join('')||'<tr><td colspan=4 class="empty">Aucune relance envoyée.</td></tr>'}</table></div></div>`;
+$('#auto').onclick=()=>{let k=0;due.forEach(f=>{const niv=niveau(f);
+if(db.relances.some(r=>r.n===f.n&&r.niv===niv))return;
+db.relances.push({date:today(),n:f.n,cl:cli(f.c).nom,niv});k++});save();toast(k?k+' relance(s) enregistrée(s)':'Aucune nouvelle relance à envoyer');relances()}}
+seed();save();nav();dash();
+</script></body></html>
